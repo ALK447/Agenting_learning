@@ -70,7 +70,22 @@ class ReportData(BaseModel):
     mark_down_report: str = Field(description="The final report")
     follow_up_questions: str= Field(description="Suggested topics to research further")
 
-writer_agent = Agent(name="Writer Agent", instructions=INSTRUCTIONS, model=MODEL_NAME, output_type=ReportData) 
+writer_agent = Agent(name="Writer Agent", instructions=INSTRUCTIONS, model=MODEL_NAME, output_type=ReportData)
+
+
+# Clarifying Agent: asks 3 questions to understand the topic better before research begins.
+
+class ClarifyingQuestions(BaseModel):
+    questions: list[str] = Field(description="Exactly 3 short clarifying questions")
+
+CLARIFY_INSTRUCTIONS = """
+You are a research assistant helping to scope a research request.
+Given a research topic, generate exactly 3 concise clarifying questions that will
+help you produce a more focused and useful report. Ask about scope, audience,
+depth, time period, or specific angles the user cares about.
+"""
+
+clarifying_agent = Agent(name="Clarifying Agent", instructions=CLARIFY_INSTRUCTIONS, model=MODEL_NAME, output_type=ClarifyingQuestions)
 
 
 #Orchestration: The following code will orchestrate the three agents to perform a complete research task. It will first use the Planner Agent to generate a set of web searches, then use the Search Agent to perform those searches and summarize the results, and finally use the Writer Agent to produce a comprehensive report based on the summary and the original query.
@@ -99,11 +114,24 @@ async def write_report(query:str, research_results:list):
     print("Finished writing report")
     return result.final_output
 
-async def run_all(query: str):
+async def get_clarifying_questions(query: str):
+    print("Generating clarifying questions...")
+    result = await Runner.run(clarifying_agent, f"Research topic: {query}")
+    qs = result.final_output.questions
+    return qs[0], qs[1], qs[2], gr.update(visible=True)
+
+async def run_all(query: str, q1: str, q2: str, q3: str, a1: str, a2: str, a3: str):
+    context = (
+        f"Research topic: {query}\n\n"
+        f"Clarifying context provided by the user:\n"
+        f"Q: {q1}\nA: {a1}\n\n"
+        f"Q: {q2}\nA: {a2}\n\n"
+        f"Q: {q3}\nA: {a3}"
+    )
     with trace("Research Task"):
-        research_results = await run_researches(query)
+        research_results = await run_researches(context)
         report = await write_report(query, research_results)
-        return report.short_summary, report.mark_down_report, report.follow_up_questions
+        return report.short_summary, report.mark_down_report, report.follow_up_questions, gr.update(visible=True)
 
 CSS = """
 body { background: #f5f5f7 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -112,12 +140,14 @@ body { background: #f5f5f7 !important; font-family: -apple-system, BlinkMacSyste
 .hero h1 { font-size: 2.6rem; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 8px; }
 .hero p { color: #6b7280; font-size: 1rem; margin: 0; }
 .card { background: #ffffff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 28px 28px 20px; margin-bottom: 20px; }
-.search-row { display: flex; gap: 12px; align-items: flex-end; }
+.card-title { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; margin-bottom: 16px; }
+.question-label { font-size: 0.95rem; font-weight: 600; color: #374151; margin: 16px 0 4px; }
 footer { display: none !important; }
 #query-box textarea { border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 1rem; padding: 14px; resize: none; transition: border 0.2s; }
 #query-box textarea:focus { border-color: #4f46e5; outline: none; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
-#research-btn { background: linear-gradient(135deg, #4f46e5, #7c3aed) !important; border: none !important; border-radius: 10px !important; color: white !important; font-weight: 600 !important; font-size: 1rem !important; padding: 14px 28px !important; cursor: pointer !important; transition: opacity 0.2s !important; height: 52px !important; }
-#research-btn:hover { opacity: 0.88 !important; }
+#ask-btn, #research-btn { background: linear-gradient(135deg, #4f46e5, #7c3aed) !important; border: none !important; border-radius: 10px !important; color: white !important; font-weight: 600 !important; font-size: 1rem !important; padding: 14px 28px !important; cursor: pointer !important; transition: opacity 0.2s !important; height: 52px !important; }
+#ask-btn:hover, #research-btn:hover { opacity: 0.88 !important; }
+#a1 textarea, #a2 textarea, #a3 textarea { border: 1.5px solid #e5e7eb !important; border-radius: 10px !important; font-size: 0.95rem !important; background: #fafafa !important; }
 .tab-nav button { font-weight: 500 !important; border-radius: 8px 8px 0 0 !important; }
 .tab-nav button.selected { color: #4f46e5 !important; border-bottom: 2px solid #4f46e5 !important; }
 #summary-box textarea, #followup-box textarea { background: #fafafa !important; border: 1.5px solid #e5e7eb !important; border-radius: 10px !important; color: #1f2937 !important; font-size: 0.95rem !important; line-height: 1.6 !important; }
@@ -131,24 +161,48 @@ with gr.Blocks(title="Deep Research Agent") as ui:
         </div>
     """)
 
+    # Step 1: query input
     with gr.Group(elem_classes="card"):
+        gr.HTML('<div class="card-title">Step 1 — Your Topic</div>')
         query_input = gr.Textbox(
             label="",
             placeholder="What do you want to research? e.g. Most popular AI agent frameworks in 2026",
             lines=2,
             elem_id="query-box",
         )
-        submit_btn = gr.Button("Research →", elem_id="research-btn")
+        ask_btn = gr.Button("Ask Clarifying Questions →", elem_id="ask-btn")
 
-    with gr.Group(elem_classes="card"):
+    # Step 2: clarifying questions (hidden until agent responds)
+    with gr.Group(elem_classes="card", visible=False) as questions_card:
+        gr.HTML('<div class="card-title">Step 2 — Help us focus the research</div>')
+        q1 = gr.Textbox(label="Question 1", interactive=False, lines=1)
+        a1 = gr.Textbox(label="Your answer", lines=2, elem_id="a1")
+        q2 = gr.Textbox(label="Question 2", interactive=False, lines=1)
+        a2 = gr.Textbox(label="Your answer", lines=2, elem_id="a2")
+        q3 = gr.Textbox(label="Question 3", interactive=False, lines=1)
+        a3 = gr.Textbox(label="Your answer", lines=2, elem_id="a3")
+        research_btn = gr.Button("Start Research →", elem_id="research-btn")
+
+    # Step 3: results (hidden until research completes)
+    with gr.Group(elem_classes="card", visible=False) as results_card:
+        gr.HTML('<div class="card-title">Step 3 — Results</div>')
         with gr.Tabs():
             with gr.Tab("Summary"):
-                summary_output = gr.Textbox(label="", lines=5, elem_id="summary-box", )
+                summary_output = gr.Textbox(label="", lines=5, elem_id="summary-box")
             with gr.Tab("Full Report"):
                 report_output = gr.Markdown()
             with gr.Tab("Follow-up Questions"):
-                followup_output = gr.Textbox(label="", lines=6, elem_id="followup-box", )
+                followup_output = gr.Textbox(label="", lines=6, elem_id="followup-box")
 
-    submit_btn.click(fn=run_all, inputs=query_input, outputs=[summary_output, report_output, followup_output])
+    ask_btn.click(
+        fn=get_clarifying_questions,
+        inputs=query_input,
+        outputs=[q1, q2, q3, questions_card],
+    )
+    research_btn.click(
+        fn=run_all,
+        inputs=[query_input, q1, q2, q3, a1, a2, a3],
+        outputs=[summary_output, report_output, followup_output, results_card],
+    )
 
 ui.launch(css=CSS)
