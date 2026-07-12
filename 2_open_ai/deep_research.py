@@ -114,13 +114,14 @@ async def write_report(query:str, research_results:list):
     print("Finished writing report")
     return result.final_output
 
-async def get_clarifying_questions(query: str):
-    yield gr.update(value="💭 Thinking about your topic...", visible=True), "", "", "", gr.update(visible=False)
+async def get_clarifying_questions(query: str, progress=gr.Progress()):
+    progress(0, desc="💭 Thinking about your topic...")
     result = await Runner.run(clarifying_agent, f"Research topic: {query}")
     qs = result.final_output.questions
-    yield gr.update(visible=False), qs[0], qs[1], qs[2], gr.update(visible=True)
+    progress(1, desc="✅ Questions ready!")
+    return qs[0], qs[1], qs[2], gr.update(visible=True)
 
-async def run_all(query: str, q1: str, q2: str, q3: str, a1: str, a2: str, a3: str):
+async def run_all(query: str, q1: str, q2: str, q3: str, a1: str, a2: str, a3: str, progress=gr.Progress()):
     context = (
         f"Research topic: {query}\n\n"
         f"Clarifying context provided by the user:\n"
@@ -129,18 +130,19 @@ async def run_all(query: str, q1: str, q2: str, q3: str, a1: str, a2: str, a3: s
         f"Q: {q3}\nA: {a3}"
     )
     with trace("Research Task"):
-        yield gr.update(value="📋 Planning searches...", visible=True), "", "", "", gr.update(visible=False)
+        progress(0.0, desc="📋 Planning searches...")
         plan_result = await Runner.run(planner_agent, f"Query: {context}")
         searches = plan_result.final_output.searches
 
-        yield gr.update(value=f"🔍 Running {len(searches)} web searches...", visible=True), "", "", "", gr.update(visible=False)
+        progress(0.3, desc=f"🔍 Running {len(searches)} web searches...")
         tasks = [search(item) for item in searches]
         research_results = await asyncio.gather(*tasks)
 
-        yield gr.update(value="✍️ Writing your research report...", visible=True), "", "", "", gr.update(visible=False)
+        progress(0.8, desc="✍️ Writing your research report...")
         report = await write_report(query, research_results)
 
-        yield gr.update(visible=False), report.short_summary, report.mark_down_report, report.follow_up_questions, gr.update(visible=True)
+        progress(1.0, desc="✅ Done!")
+        return report.short_summary, report.mark_down_report, report.follow_up_questions, gr.update(visible=True)
 
 CSS = """
 body { background: #f5f5f7 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -160,7 +162,6 @@ footer { display: none !important; }
 .tab-nav button { font-weight: 500 !important; border-radius: 8px 8px 0 0 !important; }
 .tab-nav button.selected { color: #4f46e5 !important; border-bottom: 2px solid #4f46e5 !important; }
 #summary-box textarea, #followup-box textarea { background: #fafafa !important; border: 1.5px solid #e5e7eb !important; border-radius: 10px !important; color: #1f2937 !important; font-size: 0.95rem !important; line-height: 1.6 !important; }
-#status-bar { background: linear-gradient(135deg, #ede9fe, #e0e7ff); border-radius: 12px; padding: 14px 20px; font-size: 0.95rem; font-weight: 500; color: #4f46e5; text-align: center; margin-bottom: 16px; }
 """
 
 with gr.Blocks(title="Deep Research Agent") as ui:
@@ -181,8 +182,6 @@ with gr.Blocks(title="Deep Research Agent") as ui:
             elem_id="query-box",
         )
         ask_btn = gr.Button("Ask Clarifying Questions →", elem_id="ask-btn")
-
-    status = gr.Markdown("", elem_id="status-bar", visible=False)
 
     # Step 2: clarifying questions (hidden until agent responds)
     with gr.Group(elem_classes="card", visible=False) as questions_card:
@@ -209,12 +208,12 @@ with gr.Blocks(title="Deep Research Agent") as ui:
     ask_btn.click(
         fn=get_clarifying_questions,
         inputs=query_input,
-        outputs=[status, q1, q2, q3, questions_card],
+        outputs=[q1, q2, q3, questions_card],
     )
     research_btn.click(
         fn=run_all,
         inputs=[query_input, q1, q2, q3, a1, a2, a3],
-        outputs=[status, summary_output, report_output, followup_output, results_card],
+        outputs=[summary_output, report_output, followup_output, results_card],
     )
 
 ui.launch(css=CSS)
