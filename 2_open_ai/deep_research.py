@@ -17,7 +17,7 @@ INSTRUCTIONS = """You are a research assistant. Given a search term, you search 
 produce a concise summary of the results. The summary must 2-3 paragraphs and less than 300 words.
 Capture the main points and be succinct. Reply only with the summary."""
 
-task = "Most popular I Agent frameworks in 2026"
+task = "Most popular AI Agent frameworks in 2026"
 
 settings = ModelSettings(tool_choice="required")
 
@@ -105,18 +105,50 @@ async def run_all(query: str):
         report = await write_report(query, research_results)
         return report.short_summary, report.mark_down_report, report.follow_up_questions
 
-with gr.Blocks(title="Deep Research") as ui:
-    gr.Markdown("# Deep Research Agent")
-    with gr.Row():
-        query_input = gr.Textbox(label="Research Query", placeholder="Enter your research question...", scale=4)
-        submit_btn = gr.Button("Research", variant="primary", scale=1)
-    with gr.Row():
-        summary_output = gr.Textbox(label="Short Summary", lines=3)
-    with gr.Row():
-        report_output = gr.Markdown(label="Full Report")
-    with gr.Row():
-        followup_output = gr.Textbox(label="Follow-up Questions", lines=3)
+CSS = """
+body { background: #f5f5f7 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.gradio-container { background: #f5f5f7 !important; max-width: 860px !important; margin: 0 auto !important; padding: 40px 24px !important; }
+.hero { text-align: center; padding: 48px 0 32px; }
+.hero h1 { font-size: 2.6rem; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 8px; }
+.hero p { color: #6b7280; font-size: 1rem; margin: 0; }
+.card { background: #ffffff; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 28px 28px 20px; margin-bottom: 20px; }
+.search-row { display: flex; gap: 12px; align-items: flex-end; }
+footer { display: none !important; }
+#query-box textarea { border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 1rem; padding: 14px; resize: none; transition: border 0.2s; }
+#query-box textarea:focus { border-color: #4f46e5; outline: none; box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+#research-btn { background: linear-gradient(135deg, #4f46e5, #7c3aed) !important; border: none !important; border-radius: 10px !important; color: white !important; font-weight: 600 !important; font-size: 1rem !important; padding: 14px 28px !important; cursor: pointer !important; transition: opacity 0.2s !important; height: 52px !important; }
+#research-btn:hover { opacity: 0.88 !important; }
+.tab-nav button { font-weight: 500 !important; border-radius: 8px 8px 0 0 !important; }
+.tab-nav button.selected { color: #4f46e5 !important; border-bottom: 2px solid #4f46e5 !important; }
+#summary-box textarea, #followup-box textarea { background: #fafafa !important; border: 1.5px solid #e5e7eb !important; border-radius: 10px !important; color: #1f2937 !important; font-size: 0.95rem !important; line-height: 1.6 !important; }
+"""
+
+with gr.Blocks(title="Deep Research Agent") as ui:
+    gr.HTML("""
+        <div class="hero">
+            <h1>Deep Research Agent</h1>
+            <p>Powered by GPT-4o-mini · Plans, searches, and writes a full research report</p>
+        </div>
+    """)
+
+    with gr.Group(elem_classes="card"):
+        query_input = gr.Textbox(
+            label="",
+            placeholder="What do you want to research? e.g. Most popular AI agent frameworks in 2026",
+            lines=2,
+            elem_id="query-box",
+        )
+        submit_btn = gr.Button("Research →", elem_id="research-btn")
+
+    with gr.Group(elem_classes="card"):
+        with gr.Tabs():
+            with gr.Tab("Summary"):
+                summary_output = gr.Textbox(label="", lines=5, elem_id="summary-box", )
+            with gr.Tab("Full Report"):
+                report_output = gr.Markdown()
+            with gr.Tab("Follow-up Questions"):
+                followup_output = gr.Textbox(label="", lines=6, elem_id="followup-box", )
 
     submit_btn.click(fn=run_all, inputs=query_input, outputs=[summary_output, report_output, followup_output])
 
-ui.launch()
+ui.launch(css=CSS)
